@@ -35,5 +35,11 @@ mlruns/
 # Logs
 *.log
 
+# Test cache
+.pytest_cache/
+
+# Build output
+frontend/dist/
+
 # Node
 node_modules/
