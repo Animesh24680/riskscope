@@ -1,4 +1,4 @@
-function downloadBlob(content, filename, mimeType = 'text/csv') {
+export function downloadBlob(content, filename, mimeType = 'text/csv') {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -10,7 +10,7 @@ function downloadBlob(content, filename, mimeType = 'text/csv') {
     URL.revokeObjectURL(url);
 }
 
-function exportPredictionsToCsv(results) {
+export function exportPredictionsToCsv(results) {
     const headers = ['Is_Delinquent', 'Risk_Probability', 'Confidence', 'Top_Factor', 'Method'];
     const rows = results.map(r => [
         r.is_delinquent, r.risk_probability,

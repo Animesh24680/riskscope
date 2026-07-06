@@ -1,0 +1,18 @@
+{
+  "name": "riskscope",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently -n api,web -c red,cyan \"cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000\" \"cd frontend && vite\"",
+    "dev:api": "cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:web": "cd frontend && vite",
+    "build": "cd frontend && vite build",
+    "lint": "cd frontend && eslint .",
+    "format": "cd frontend && prettier --write .",
+    "test": "cd backend && python -m pytest tests/ -v --tb=short",
+    "migrate:init": "cd backend && alembic upgrade head"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

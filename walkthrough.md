@@ -1,4 +1,4 @@
-# Customer Delinquency Predictor — Walkthrough
+# RiskScope — Walkthrough
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@
 
 ```bash
 # 1. Navigate to project root
-cd delinquency-predictor
+cd riskscope
 
 # 2. Create virtual environment
 python -m venv .venv

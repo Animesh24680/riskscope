@@ -71,13 +71,13 @@ class DelinquencyModel:
         }
 
         self.is_trained = True
-        self.save()
-        return metrics
+        version_path = self.save()
+        return {**metrics, "version_path": version_path}
 
     def predict(self, age: float, income: float, credit_score: float,
                 missed_payments: int, debt_to_income_ratio: float) -> dict:
         if not self.is_trained:
-            return self._rule_based_prediction(credit_score, missed_payments, debt_to_income_ratio)
+            return self._rule_based_prediction(credit_score, missed_payments, debt_to_income_ratio, age, income)
 
         input_data = np.array([[age, income, credit_score, missed_payments, debt_to_income_ratio]])
         input_scaled = self.scaler.transform(input_data)
@@ -94,9 +94,14 @@ class DelinquencyModel:
 
     def predict_batch(self, df: pd.DataFrame) -> list[dict]:
         if not self.is_trained:
-            return [self._rule_based_prediction(
-                row["Credit_Score"], row["Missed_Payments"], row["Debt_to_Income_Ratio"]
-            ) for _, row in df.iterrows()]
+            return [
+                self._rule_based_prediction(
+                    row["Credit_Score"], row["Missed_Payments"],
+                    row["Debt_to_Income_Ratio"],
+                    row.get("Age"), row.get("Income"),
+                )
+                for _, row in df.iterrows()
+            ]
 
         X = df[FEATURES]
         X_scaled = self.scaler.transform(X)
@@ -119,27 +124,60 @@ class DelinquencyModel:
         importances = self.model.feature_importances_
         return dict(zip(FEATURES, [round(v, 4) for v in importances]))
 
-    def _rule_based_prediction(self, credit_score: float, missed_payments: int,
-                                debt_to_income_ratio: float) -> dict:
-        risk_factors = 0
-        if credit_score < 600:
-            risk_factors += 1
-        if missed_payments > 2:
-            risk_factors += 1
-        if debt_to_income_ratio > 0.4:
-            risk_factors += 1
-        is_delinquent = risk_factors >= 2
+    def _rule_based_prediction(self, credit_score: float = 0, missed_payments: int = 0,
+                               debt_to_income_ratio: float = 0, age: float | None = None,
+                               income: float | None = None) -> dict:
+        score = 0.0
+
+        if credit_score < 580:
+            score += 0.35
+        elif credit_score < 620:
+            score += 0.25
+        elif credit_score < 670:
+            score += 0.12
+
+        if missed_payments >= 5:
+            score += 0.30
+        elif missed_payments >= 3:
+            score += 0.20
+        elif missed_payments >= 1:
+            score += 0.08
+
+        if debt_to_income_ratio > 0.5:
+            score += 0.25
+        elif debt_to_income_ratio > 0.4:
+            score += 0.15
+        elif debt_to_income_ratio > 0.3:
+            score += 0.05
+
+        if age is not None and age < 25:
+            score += 0.05
+        if income is not None and income < 30000:
+            score += 0.05
+
+        is_delinquent = score >= 0.35
+        confidence = 0.6 + min(abs(score - 0.35) / 0.65 * 0.3, 0.35)
+
+        if score >= 0.55:
+            message = "High risk"
+        elif score >= 0.35:
+            message = "Medium risk"
+        else:
+            message = "Low risk"
+
         return {
             "is_delinquent": is_delinquent,
-            "risk_probability": round(risk_factors / 3, 4),
-            "confidence": 0.7,
+            "risk_probability": round(min(score, 0.95), 4),
+            "confidence": round(min(confidence, 0.95), 4),
             "method": "rule_based",
+            "rule_based_risk_tier": message,
         }
 
-    def save(self) -> None:
+    def save(self) -> str:
         os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
         with open(self.model_path, "wb") as f:
             pickle.dump({"model": self.model, "scaler": self.scaler, "is_trained": self.is_trained}, f)
+        return self.model_path
 
     def load(self) -> bool:
         if not os.path.exists(self.model_path):

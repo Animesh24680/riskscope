@@ -1,3 +1,9 @@
+import { Chart, registerables } from 'chart.js';
+Chart.register(...registerables);
+import { showToast } from './components/toast.js';
+import { api, setApiKey } from './api.js';
+import { downloadBlob, exportPredictionsToCsv } from './utils/export.js';
+
 // Navigation
 document.querySelectorAll('.nav-btn[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -21,6 +27,30 @@ themeToggle.addEventListener('click', () => {
     const next = current === 'dark' ? 'light' : 'dark';
     html.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
+});
+
+// API Key management
+const apiKeyToggle = document.getElementById('apiKeyToggle');
+const apiKeyDropdown = document.getElementById('apiKeyDropdown');
+const apiKeyInput = document.getElementById('apiKeyInput');
+
+const savedKey = localStorage.getItem('apiKey') || '';
+if (savedKey) apiKeyInput.value = savedKey;
+
+apiKeyToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    apiKeyDropdown.classList.toggle('hidden');
+    if (!apiKeyDropdown.classList.contains('hidden')) apiKeyInput.focus();
+});
+
+apiKeyInput.addEventListener('change', () => {
+    setApiKey(apiKeyInput.value.trim());
+});
+
+document.addEventListener('click', (e) => {
+    if (!apiKeyDropdown.classList.contains('hidden') && !apiKeyDropdown.contains(e.target) && e.target !== apiKeyToggle) {
+        apiKeyDropdown.classList.add('hidden');
+    }
 });
 
 // Toast
@@ -370,7 +400,7 @@ const WI_FIELDS = [
 
 let whatIfTimeout;
 
-WI_FIELDS.forEach(({ id, display, field, decimals }) => {
+WI_FIELDS.forEach(({ id, display, decimals }) => {
     const slider = document.getElementById(id);
     const displayEl = document.getElementById(display);
     slider.addEventListener('input', () => {
@@ -402,7 +432,6 @@ function updateWhatIfResult(result) {
     const probText = document.getElementById('wiProbability');
     const shapBox = document.getElementById('wiShapBars');
 
-    const deg = result.risk_probability * 180;
     fill.textContent = `${pct}%`;
     riskText.textContent = result.is_delinquent ? 'High Risk' : 'Low Risk';
     riskText.style.color = result.is_delinquent ? 'var(--danger)' : 'var(--success)';
@@ -433,3 +462,121 @@ function updateWhatIfResult(result) {
 
 // Initial what-if load
 setTimeout(runWhatIf, 500);
+
+// ─── MODELS PAGE ────────────────────────────────────────────────
+async function loadModelsPage() {
+    try {
+        const [modelsData, driftData] = await Promise.all([
+            api.models(),
+            api.drift(),
+        ]);
+
+        const summary = modelsData.summary || {};
+        const models = modelsData.models || [];
+
+        document.getElementById('modelsSummary').innerHTML = `
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-value">${summary.total || 0}</span>
+                    <span class="stat-label">Total Versions</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" style="color:var(--success)">${summary.active || '--'}</span>
+                    <span class="stat-label">Active Version</span>
+                </div>
+            </div>
+        `;
+
+        const activeVersion = summary.active;
+        const tbody = document.getElementById('modelsTableBody');
+        tbody.innerHTML = '';
+        models.forEach(m => {
+            const isActive = m.id === activeVersion;
+            const acc = m.metrics?.test_accuracy ?? m.metrics?.train_accuracy ?? '--';
+            const prec = m.metrics?.precision ?? '--';
+            const rec = m.metrics?.recall ?? '--';
+            const f1 = m.metrics?.f1_score ?? '--';
+            const auc = m.metrics?.roc_auc ?? '--';
+            const date = new Date(m.created_at).toLocaleDateString();
+            const tr = document.createElement('tr');
+            tr.style.opacity = isActive ? '1' : '0.6';
+            tr.innerHTML = `
+                <td><strong>${m.id}</strong>${isActive ? ' <span class="risk-badge low">ACTIVE</span>' : ''}</td>
+                <td>${date}</td>
+                <td>${typeof acc === 'number' ? (acc * 100).toFixed(1) + '%' : acc}</td>
+                <td>${typeof prec === 'number' ? (prec * 100).toFixed(1) + '%' : prec}</td>
+                <td>${typeof rec === 'number' ? (rec * 100).toFixed(1) + '%' : rec}</td>
+                <td>${typeof f1 === 'number' ? f1.toFixed(4) : f1}</td>
+                <td>${typeof auc === 'number' ? (auc * 100).toFixed(1) + '%' : auc}</td>
+                <td>${isActive ? '' : `<button class="btn-secondary rollback-btn" data-version="${m.id}" style="font-size:0.75rem;padding:4px 10px">Rollback</button>`}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        document.querySelectorAll('.rollback-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const ver = btn.dataset.version;
+                try {
+                    await api.rollback(ver);
+                    showToast(`Rolled back to ${ver}`, 'success');
+                    loadModelsPage();
+                } catch (err) {
+                    showToast(`Rollback failed: ${err.message}`, 'error');
+                }
+            });
+        });
+
+        // Drift
+        const driftEl = document.getElementById('driftContent');
+        if (driftData.drift_detected) {
+            driftEl.innerHTML = `
+                <div class="drift-alert">
+                    <strong>Drift detected!</strong> PSI: ${driftData.psi}
+                </div>
+                <p style="margin-top:8px;font-size:0.9rem;color:var(--text-secondary)">
+                    Window mean risk: ${(driftData.window_mean_risk * 100).toFixed(1)}%
+                    (baseline: ${(driftData.baseline_mean_risk * 100).toFixed(1)}%)
+                    &mdash; Consider retraining.
+                </p>
+            `;
+        } else {
+            driftEl.innerHTML = `
+                <p style="color:var(--success)">No significant drift detected (PSI: ${driftData.psi})</p>
+                <p style="margin-top:4px;font-size:0.9rem;color:var(--text-secondary)">
+                    Window: ${(driftData.window_mean_risk * 100).toFixed(1)}%
+                    &middot; Baseline: ${(driftData.baseline_mean_risk * 100).toFixed(1)}%
+                </p>
+            `;
+        }
+    } catch (err) {
+        showToast(`Failed to load models: ${err.message}`, 'error');
+    }
+}
+
+// Models nav activation
+const origNavHandler = document.querySelector('.nav-btn[data-page="models"]');
+if (origNavHandler) {
+    origNavHandler.addEventListener('click', () => {
+        setTimeout(loadModelsPage, 100);
+    });
+}
+
+// Retrain button
+document.getElementById('retrainBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('retrainBtn');
+    btn.disabled = true;
+    btn.textContent = 'Training...';
+    try {
+        const result = await api.train.start();
+        showToast(`Model trained! Acc: ${(result.test_accuracy * 100).toFixed(1)}%`, 'success');
+        loadModelsPage();
+    } catch (err) {
+        showToast(`Training failed: ${err.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg> Retrain Model`;
+    }
+});

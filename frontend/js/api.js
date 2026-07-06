@@ -1,7 +1,7 @@
 const API_BASE = '';
 let apiKey = localStorage.getItem('apiKey') || '';
 
-function setApiKey(key) {
+export function setApiKey(key) {
     apiKey = key;
     localStorage.setItem('apiKey', key);
 }
@@ -27,7 +27,7 @@ async function apiRequest(endpoint, options = {}) {
     return response.json();
 }
 
-const api = {
+export const api = {
     predict: (data) => apiRequest('/predict', {
         method: 'POST',
         body: JSON.stringify(data),
@@ -64,4 +64,8 @@ const api = {
     },
 
     health: () => apiRequest('/health'),
+    models: () => apiRequest('/train/models'),
+    rollback: (versionId) => apiRequest(`/train/rollback/${versionId}`, { method: 'POST' }),
+    drift: (window = 100, baseline = 500) =>
+        apiRequest(`/drift?window=${window}&baseline=${baseline}`),
 };

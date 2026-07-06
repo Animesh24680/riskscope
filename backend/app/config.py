@@ -1,3 +1,5 @@
+import os
+import sys
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -12,6 +14,10 @@ class Settings(BaseSettings):
     debug: bool = False
     api_keys: list[str] = []
     data_path: str = "data/raw/delinquency_data.csv"
-    secret_key: str = "change-me-in-production"
+    secret_key: str = ""
 
 settings = Settings()
+
+if not settings.secret_key and os.environ.get("RUNTIME_ENV", "development") != "development":
+    print("FATAL: SECRET_KEY must be set in production", file=sys.stderr)
+    sys.exit(1)

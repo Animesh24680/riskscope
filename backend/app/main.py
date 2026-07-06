@@ -1,20 +1,18 @@
-import os
-import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.database import init_db, SessionLocal, Prediction
-from app.routers import predict, train, dashboard
+from app.routers import predict, train, dashboard, drift
 from app.services.predictor import initialize_model
+from app.auth import verify_api_key, get_rate_limit_key
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_rate_limit_key)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,8 +22,8 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="Customer Delinquency Predictor API",
-    description="ML-powered API to predict customer financial delinquency risk",
+    title="RiskScope API",
+    description="ML-powered API to assess credit risk",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -40,14 +38,24 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key", "Authorization"],
 )
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.url.path not in ("/health", "/", "/docs", "/openapi.json", "/redoc", "/train/models"):
+        try:
+            verify_api_key(request)
+        except Exception as e:
+            return JSONResponse(status_code=401, content={"detail": str(e)})
+    return await call_next(request)
 
 app.include_router(predict.router)
 app.include_router(train.router)
 app.include_router(dashboard.router)
+app.include_router(drift.router)
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 @app.get("/health")
 async def health():
